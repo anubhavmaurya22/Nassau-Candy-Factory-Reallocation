@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Nassau Candy Distributor — Factory Optimization Dashboard
 
 ## Setup (Windows PowerShell)
@@ -62,3 +63,7 @@ nassau-candy/
 - **Distance & shipping cost assumptions** are explicit, stated modeling
   choices (not measured facts), since the raw data has no real link
   between factory location and delivery speed/cost.
+=======
+# Nassau-Candy-Factory-Reallocation-Shipping-Optimization
+>>>>>>> 23a58ba1bbc1030c79630b3d375b08f655bd8bd1
+# Nassau-Candy-Factory-Reallocation
