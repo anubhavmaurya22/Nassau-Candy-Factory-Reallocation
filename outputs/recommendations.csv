@@ -1,0 +1,16 @@
+Product,Current Factory,Recommended Factory,Reassignment Suggested,Lead Time Gain (days),Profit Margin Change,High Risk
+Fun Dip,Sugar Shack,Secret Factory,True,0.92,0.107,False
+Wonka Bar - Fudge Mallows,Lot's O' Nuts,Secret Factory,True,0.8,-0.008,False
+Wonka Bar - Nutty Crunch Surprise,Lot's O' Nuts,Secret Factory,True,0.77,-0.0169,True
+Wonka Bar -Scrumdiddlyumptious,Lot's O' Nuts,Secret Factory,True,0.75,-0.0089,False
+Nerds,Sugar Shack,Secret Factory,True,0.64,0.0231,False
+Laffy Taffy,Sugar Shack,Secret Factory,True,0.61,0.0153,False
+SweeTARTS,Sugar Shack,The Other Factory,True,0.59,0.0573,False
+Wonka Bar - Triple Dazzle Caramel,Wicked Choccy's,Secret Factory,True,0.48,0.0218,False
+Wonka Bar - Milk Chocolate,Wicked Choccy's,Secret Factory,True,0.47,0.0244,False
+Everlasting Gobstopper,Secret Factory,The Other Factory,True,0.38,-0.0118,True
+Kazookles,The Other Factory,Secret Factory,True,0.01,0.0575,False
+Wonka Gum,Secret Factory,Secret Factory,False,0.0,0.0,False
+Fizzy Lifting Drinks,Sugar Shack,Sugar Shack,False,0.0,0.0,False
+Lickable Wallpaper,Secret Factory,Secret Factory,False,0.0,0.0,False
+Hair Toffee,The Other Factory,The Other Factory,False,0.0,0.0,False
