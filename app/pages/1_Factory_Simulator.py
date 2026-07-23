@@ -6,7 +6,7 @@ from utils import (
     load_data,
     load_models,
     sidebar_filters,
-    evaluate_product_across_factories,
+    evaluate_product_cached,
     score_factories,
 )
 
@@ -19,9 +19,9 @@ lead_pipe, profit_pipe = load_models()
 
 product, region, ship_mode, speed_weight = sidebar_filters(df, key_prefix="sim")
 
-result = evaluate_product_across_factories(
-    df, product, lead_pipe, profit_pipe, region_filter=region, ship_mode_filter=ship_mode
-)
+# Expensive step (model inference) is cached and only re-runs when
+# product/region/ship_mode change - NOT when the slider moves.
+result = evaluate_product_cached(product, region_filter=region, ship_mode_filter=ship_mode)
 
 if result.empty:
     st.warning("No historical orders match this product + filter combination.")

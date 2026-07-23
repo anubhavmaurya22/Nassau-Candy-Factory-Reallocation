@@ -18,13 +18,32 @@ table = load_full_recommendations(speed_weight)
 risky = table[table["High Risk"]]
 safe_reassignments = table[table["Reassignment Suggested"] & ~table["High Risk"]]
 profit_losses = table[table["Profit Margin Change"] < 0]
+low_confidence_reassignments = table[table["Reassignment Suggested"] & (table["Confidence"] == "Low")]
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 col1.metric("🔴 High-Risk Reassignments", len(risky))
 col2.metric("🟢 Safe Reassignments", len(safe_reassignments))
 col3.metric("📉 Any Profit Decline", len(profit_losses))
+col4.metric("🟡 Low-Confidence Reassignments", len(low_confidence_reassignments))
 
 st.markdown("---")
+
+if len(low_confidence_reassignments):
+    st.subheader("🟡 Low-Confidence Reassignments")
+    st.markdown(
+        "These products have **fewer than 20 historical orders** backing "
+        "their current-factory numbers. The recommendation may be directionally "
+        "correct, but shouldn't be treated as statistically conclusive - "
+        "collect more shipment data before acting."
+    )
+    st.dataframe(
+        low_confidence_reassignments.style.format({
+            "Lead Time Gain (days)": "{:.2f}",
+            "Profit Margin Change": "{:+.2%}",
+        }),
+        use_container_width=True, hide_index=True,
+    )
+    st.markdown("---")
 
 if len(risky):
     st.subheader("🔴 High-Risk Reassignments")

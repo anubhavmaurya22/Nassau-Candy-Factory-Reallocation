@@ -1,7 +1,7 @@
 import plotly.graph_objects as go
 import streamlit as st
 
-from utils import load_data, load_models, sidebar_filters, recommend_for_product
+from utils import load_data, load_models, sidebar_filters, evaluate_product_cached, summarize_recommendation
 
 st.set_page_config(page_title="What-If Analysis", page_icon="🔀", layout="wide")
 st.title("🔀 What-If Scenario Analysis")
@@ -12,14 +12,25 @@ lead_pipe, profit_pipe = load_models()
 
 product, region, ship_mode, speed_weight = sidebar_filters(df, key_prefix="whatif")
 
-summary = recommend_for_product(
-    df, product, lead_pipe, profit_pipe, speed_weight,
-    region_filter=region, ship_mode_filter=ship_mode,
-)
+# Expensive step (model inference) is cached and only re-runs when
+# product/region/ship_mode change. Scoring against the slider is cheap.
+result = evaluate_product_cached(product, region_filter=region, ship_mode_filter=ship_mode)
+summary = summarize_recommendation(product, result, speed_weight)
 
 if summary is None:
     st.warning("No historical orders match this product + filter combination.")
     st.stop()
+
+confidence_colors = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}
+st.caption(
+    f"{confidence_colors[summary['confidence']]} **{summary['confidence']} confidence** "
+    f"— based on {summary['order_count']} historical order(s) for this product's current factory."
+)
+if summary["confidence"] == "Low":
+    st.warning(
+        "⚠️ This product has very few historical orders. Treat this recommendation as "
+        "directional, not conclusive — collect more shipment data before acting on it."
+    )
 
 col1, col2, col3 = st.columns(3)
 col1.metric("Current Factory", summary["current_factory"])

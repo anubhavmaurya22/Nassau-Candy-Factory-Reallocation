@@ -16,16 +16,17 @@ speed_weight = st.sidebar.slider(
 )
 
 show_only_reassignments = st.sidebar.checkbox("Show only suggested reassignments", value=True)
+hide_low_confidence = st.sidebar.checkbox("Hide low-confidence recommendations", value=False)
 
-table = load_full_recommendations(speed_weight)
-
-if show_only_reassignments:
-    table = table[table["Reassignment Suggested"]]
+full_table = load_full_recommendations(speed_weight)
+table = full_table[full_table["Reassignment Suggested"]] if show_only_reassignments else full_table
+if hide_low_confidence:
+    table = table[table["Confidence"] != "Low"]
 
 col1, col2, col3 = st.columns(3)
-col1.metric("Products Analyzed", len(load_full_recommendations(speed_weight)))
-col2.metric("Reassignments Suggested", int(load_full_recommendations(speed_weight)["Reassignment Suggested"].sum()))
-col3.metric("High-Risk Flags", int(load_full_recommendations(speed_weight)["High Risk"].sum()))
+col1.metric("Products Analyzed", len(full_table))
+col2.metric("Reassignments Suggested", int(full_table["Reassignment Suggested"].sum()))
+col3.metric("High-Risk Flags", int(full_table["High Risk"].sum()))
 
 st.markdown("---")
 
@@ -36,9 +37,16 @@ st.dataframe(
     }).map(
         lambda v: "background-color:#ffe3e3" if v is True else "",
         subset=["High Risk"],
+    ).map(
+        lambda v: {"Low": "background-color:#fff3bf", "Medium": "", "High": "background-color:#ebfbee"}.get(v, ""),
+        subset=["Confidence"],
     ),
     use_container_width=True,
     hide_index=True,
+)
+st.caption(
+    "🟢 High confidence = 100+ historical orders backing this product's current factory. "
+    "🟡 Low confidence = fewer than 20 — treat as directional, not conclusive."
 )
 
 st.subheader("Expected lead-time gain by product")

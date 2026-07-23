@@ -22,14 +22,34 @@ from reference_data import FACTORIES, PRODUCT_FACTORY, PRODUCT_DIVISION, STATE_C
 PROCESSED_PATH = "data/processed.csv"
 MODEL_DIR = "models"
 
+# ---------------------------------------------------------------------------
+# Confidence tiers based on historical order count for the CURRENT factory.
+# EDA showed order volume is extremely concentrated: the 5 Wonka Bar
+# (Chocolate) products have 1,800-2,100 orders each, while several
+# Sugar/Other products have as few as 3-4. A recommendation backed by 3
+# orders is not as trustworthy as one backed by 1,800, even if the
+# predicted numbers look equally clean - this tier makes that visible
+# instead of hiding it.
+# ---------------------------------------------------------------------------
+CONFIDENCE_THRESHOLDS = {"High": 100, "Medium": 20}  # Low = below Medium threshold
+
+
+def confidence_tier(order_count: int) -> str:
+    if order_count >= CONFIDENCE_THRESHOLDS["High"]:
+        return "High"
+    if order_count >= CONFIDENCE_THRESHOLDS["Medium"]:
+        return "Medium"
+    return "Low"
+
 
 def haversine_miles(lat1, lon1, lat2, lon2):
+    """Vectorized haversine - works on scalars or numpy arrays/Series."""
     R = 3958.8
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
-    return 2 * R * math.asin(math.sqrt(a))
+    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+    dphi = lat2 - lat1
+    dlambda = lon2 - lon1
+    a = np.sin(dphi / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlambda / 2) ** 2
+    return 2 * R * np.arcsin(np.sqrt(a))
 
 
 def load_models():
@@ -45,6 +65,10 @@ def evaluate_product_across_factories(df, product_name, lead_pipe, profit_pipe,
     by region / ship mode) against EVERY factory by recalculating distance,
     then averages the model's predicted lead time & profit margin per
     factory. Returns a per-factory summary table.
+
+    This is the EXPENSIVE step (model inference) and does NOT depend on the
+    speed/profit slider - callers should cache this and only re-run
+    score_factories() (cheap) when the slider moves.
     """
     rows = df[df["Product Name"] == product_name].copy()
     if region_filter:
@@ -61,10 +85,11 @@ def evaluate_product_across_factories(df, product_name, lead_pipe, profit_pipe,
     records = []
     for fac_name, coords in FACTORIES.items():
         sub = rows.copy()
-        sub["DistanceToFactoryMiles"] = sub.apply(
-            lambda r: haversine_miles(coords["lat"], coords["lon"], r["cust_lat"], r["cust_lon"])
-            if pd.notna(r["cust_lat"]) else np.nan,
-            axis=1,
+        # Vectorized distance calc (no row-wise .apply - this was the main
+        # source of lag, especially for high-volume products like the
+        # Wonka Bars with 1,800-2,100 rows each).
+        sub["DistanceToFactoryMiles"] = haversine_miles(
+            coords["lat"], coords["lon"], sub["cust_lat"].values, sub["cust_lon"].values
         )
         sub["Division_clean"] = division
 
@@ -87,6 +112,27 @@ def evaluate_product_across_factories(df, product_name, lead_pipe, profit_pipe,
 
     result = pd.DataFrame(records)
     return result
+
+
+def evaluate_all_products_across_factories(df, lead_pipe, profit_pipe,
+                                            region_filter=None, ship_mode_filter=None):
+    """
+    Same as evaluate_product_across_factories, but for EVERY product at
+    once. This is the single expensive computation the Recommendation
+    Dashboard and Risk Panel need - callers should cache the result of
+    THIS function (independent of the slider), then call score_factories()
+    per-product (cheap, pure arithmetic) whenever the slider changes.
+
+    Returns a dict: {product_name: result_dataframe}
+    """
+    results = {}
+    for product in df["Product Name"].unique():
+        r = evaluate_product_across_factories(
+            df, product, lead_pipe, profit_pipe, region_filter, ship_mode_filter
+        )
+        if not r.empty:
+            results[product] = r
+    return results
 
 
 def score_factories(result_df, speed_weight: float):
@@ -120,12 +166,14 @@ def score_factories(result_df, speed_weight: float):
     return df
 
 
-def recommend_for_product(df, product_name, lead_pipe, profit_pipe, speed_weight=0.5,
-                           region_filter=None, ship_mode_filter=None):
-    result = evaluate_product_across_factories(
-        df, product_name, lead_pipe, profit_pipe, region_filter, ship_mode_filter
-    )
-    if result.empty:
+def summarize_recommendation(product_name, result, speed_weight=0.5):
+    """
+    Cheap step: takes an already-computed per-factory result table (from
+    evaluate_product_across_factories) and applies scoring/ranking for a
+    given speed_weight. No model inference happens here - safe to call on
+    every slider tick.
+    """
+    if result is None or result.empty:
         return None
     scored = score_factories(result, speed_weight)
 
@@ -154,21 +202,47 @@ def recommend_for_product(df, product_name, lead_pipe, profit_pipe, speed_weight
         "table": scored,
     }
 
-    # Simple, transparent risk flag: reassignment looks good on the
-    # weighted score, but would actually REDUCE profit margin -> flag it.
     summary["high_risk"] = bool(
         summary["is_reassignment"] and summary["profit_margin_change"] is not None
         and summary["profit_margin_change"] < -0.01
     )
+
+    # Confidence is based on how many historical orders back the CURRENT
+    # factory's numbers (the reference point every comparison is made
+    # against). Low order counts mean the underlying averages are noisy.
+    current_order_count = (
+        current_row["OrderCount"].values[0] if not current_row.empty else scored["OrderCount"].min()
+    )
+    summary["order_count"] = int(current_order_count)
+    summary["confidence"] = confidence_tier(current_order_count)
+
     return summary
 
 
-def build_full_recommendation_table(df, lead_pipe, profit_pipe, speed_weight=0.5):
-    """Ranked list of reassignment suggestions across ALL products - powers
-    the Recommendation Dashboard."""
+def recommend_for_product(df, product_name, lead_pipe, profit_pipe, speed_weight=0.5,
+                           region_filter=None, ship_mode_filter=None):
+    """Convenience wrapper: runs BOTH the expensive prediction step and the
+    cheap scoring step for a single product. Fine for one-off calls (e.g.
+    the Factory Simulator / What-If pages, which only evaluate one product
+    at a time), but the Recommendation Dashboard / Risk Panel should use
+    evaluate_all_products_across_factories() + summarize_recommendation()
+    instead so the expensive step is only computed once and cached."""
+    result = evaluate_product_across_factories(
+        df, product_name, lead_pipe, profit_pipe, region_filter, ship_mode_filter
+    )
+    return summarize_recommendation(product_name, result, speed_weight)
+
+
+def build_full_recommendation_table(all_results: dict, speed_weight=0.5):
+    """
+    Ranked list of reassignment suggestions across ALL products - powers
+    the Recommendation Dashboard. Takes the pre-computed dict from
+    evaluate_all_products_across_factories() (cheap to re-score, no model
+    inference happens here) so this is safe to call on every slider move.
+    """
     rows = []
-    for product in df["Product Name"].unique():
-        s = recommend_for_product(df, product, lead_pipe, profit_pipe, speed_weight)
+    for product, result in all_results.items():
+        s = summarize_recommendation(product, result, speed_weight)
         if s is None:
             continue
         rows.append({
@@ -179,6 +253,8 @@ def build_full_recommendation_table(df, lead_pipe, profit_pipe, speed_weight=0.5
             "Lead Time Gain (days)": round(s["lead_time_gain_days"], 2) if s["lead_time_gain_days"] is not None else None,
             "Profit Margin Change": round(s["profit_margin_change"], 4) if s["profit_margin_change"] is not None else None,
             "High Risk": s["high_risk"],
+            "Historical Orders": s["order_count"],
+            "Confidence": s["confidence"],
         })
     out = pd.DataFrame(rows)
     out = out.sort_values("Lead Time Gain (days)", ascending=False)
@@ -188,6 +264,7 @@ def build_full_recommendation_table(df, lead_pipe, profit_pipe, speed_weight=0.5
 if __name__ == "__main__":
     df = pd.read_csv(PROCESSED_PATH)
     lead_pipe, profit_pipe = load_models()
-    table = build_full_recommendation_table(df, lead_pipe, profit_pipe, speed_weight=0.5)
+    all_results = evaluate_all_products_across_factories(df, lead_pipe, profit_pipe)
+    table = build_full_recommendation_table(all_results, speed_weight=0.5)
     print(table.to_string(index=False))
     table.to_csv("outputs/recommendations.csv", index=False)
