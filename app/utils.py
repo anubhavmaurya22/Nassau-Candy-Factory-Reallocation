@@ -16,7 +16,9 @@ if SRC_DIR not in sys.path:
 from reference_data import FACTORIES, PRODUCT_FACTORY, PRODUCT_DIVISION  # noqa: E402
 from optimizer import (  # noqa: E402
     evaluate_product_across_factories,
+    evaluate_all_products_across_factories,
     score_factories,
+    summarize_recommendation,
     recommend_for_product,
     build_full_recommendation_table,
 )
@@ -38,10 +40,38 @@ def load_models():
 
 
 @st.cache_data
-def load_full_recommendations(speed_weight: float):
+def load_all_predictions(region_filter=None, ship_mode_filter=None):
+    """
+    THE EXPENSIVE STEP: runs both ML models across every (product, factory)
+    pair. Cached independent of the speed/profit slider, so moving the
+    slider never re-triggers model inference - only the cheap scoring step
+    (build_full_recommendation_table) re-runs, which is pure arithmetic on
+    a ~75-row table and is effectively instant.
+    """
     df = load_data()
     lead_pipe, profit_pipe = load_models()
-    return build_full_recommendation_table(df, lead_pipe, profit_pipe, speed_weight)
+    return evaluate_all_products_across_factories(
+        df, lead_pipe, profit_pipe, region_filter=region_filter, ship_mode_filter=ship_mode_filter
+    )
+
+
+def load_full_recommendations(speed_weight: float, region_filter=None, ship_mode_filter=None):
+    """Cheap re-scoring step - safe to call on every slider tick."""
+    all_results = load_all_predictions(region_filter, ship_mode_filter)
+    return build_full_recommendation_table(all_results, speed_weight)
+
+
+@st.cache_data
+def evaluate_product_cached(product_name, region_filter=None, ship_mode_filter=None):
+    """Cached expensive step for a single product (used by the Factory
+    Simulator and What-If Analysis pages). Cached independent of the
+    speed/profit slider - only re-runs when product/region/ship-mode
+    filters actually change."""
+    df = load_data()
+    lead_pipe, profit_pipe = load_models()
+    return evaluate_product_across_factories(
+        df, product_name, lead_pipe, profit_pipe, region_filter, ship_mode_filter
+    )
 
 
 def sidebar_filters(df: pd.DataFrame, key_prefix: str = ""):
